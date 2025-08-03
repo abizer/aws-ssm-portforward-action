@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { SSMClient, StartSessionCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, StartSessionCommand, StartSessionCommandInput } from '@aws-sdk/client-ssm';
 
 async function run() {
   try {
@@ -16,7 +16,7 @@ async function run() {
       customUserAgent: `gha-${github.context.repo.repo}`,
     });
 
-    const sessionParams = {
+    const sessionParams: StartSessionCommandInput = {
       Target: target,
       DocumentName: 'AWS-StartPortForwardingSessionToRemoteHost',
       Parameters: {
