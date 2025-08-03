@@ -1,7 +1,7 @@
 {
-  "name": "aws-ssm-portforward-action",
+  "name": "aws-ssm-remote-port-forward-action",
   "version": "1.0.0",
-  "description": "Starts an AWS SSM port forwarding session to a remote host",
+  "description": "Starts an AWS SSM remote port forwarding session to a host",
   "main": "dist/index.js",
   "scripts": {
     "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt && ncc build src/post.ts -o dist/post --source-map",

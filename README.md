@@ -1,6 +1,6 @@
 # AWS SSM Remote Port Forward Action
 
-This GitHub Action starts an AWS Systems Manager (SSM) port forwarding session to a remote host. This is useful for establishing a secure tunnel to a private resource, such as a database, allowing subsequent steps in your workflow to access it.
+This GitHub Action starts an AWS Systems Manager (SSM) port forwarding session to a remote host. This is useful for establishing a secure tunnel to a private resource, such as an RDS cluster, allowing subsequent steps in your workflow to access it.
 
 ## Usage
 
@@ -22,14 +22,14 @@ jobs:
         uses: actions/checkout@v3
 
       - name: 'Configure AWS Credentials'
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::123456789:role/GitHubActionsRole
+          role-session-name: GitHubActions-RemotePortForward
           aws-region: us-east-2
 
       - name: 'Start SSM Port Forwarding'
-        uses: abizer/aws-ssm-portforward-action@v1
+        uses: abizer/aws-ssm-remote-port-forward-action@v1
         with:
           target: 'ecs:your-cluster:your-task-id' # or an EC2 instance ID
           host: 'your-rds-instance.endpoint.amazonaws.com'

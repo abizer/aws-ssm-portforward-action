@@ -1,5 +1,5 @@
-name: 'AWS SSM Port Forward Action'
-description: 'Starts an AWS SSM port forwarding session to a remote host'
+name: 'AWS SSM Remote Port Forward Action'
+description: 'Starts an AWS SSM remote port forwarding session to a host'
 author: 'abizer'
 inputs:
   target:
