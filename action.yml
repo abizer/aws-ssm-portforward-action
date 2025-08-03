@@ -1,0 +1,23 @@
+name: 'AWS SSM Port Forward Action'
+description: 'Starts an AWS SSM port forwarding session to a remote host'
+author: 'abizer'
+inputs:
+  target:
+    description: 'The AWS instance to port forward through (e.g., an EC2 instance ID or ECS task ARN)'
+    required: true
+  host:
+    description: 'The remote host to connect to (e.g., an RDS instance endpoint)'
+    required: true
+  local-port:
+    description: 'The local port to forward to the remote host'
+    required: true
+  remote-port:
+    description: 'The remote port on the host to connect to'
+    required: true
+  aws-region:
+    description: 'The AWS region to use'
+    required: true
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+  post: 'dist/post/index.js'
