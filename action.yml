@@ -17,7 +17,16 @@ inputs:
   aws-region:
     description: 'The AWS region to use'
     required: true
+  command:
+    description: 'The command to run while the port forwarding tunnel is active'
+    required: true
+outputs:
+  command-exit-code:
+    description: 'The exit code of the command that was run'
+  command-stdout:
+    description: 'The stdout output of the command that was run'
+  command-stderr:
+    description: 'The stderr output of the command that was run'
 runs:
   using: 'node20'
   main: 'dist/index.js'
-  post: 'dist/post/index.js'

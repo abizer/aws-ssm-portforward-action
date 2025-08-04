@@ -4,7 +4,7 @@
   "description": "Starts an AWS SSM remote port forwarding session to a host",
   "main": "dist/index.js",
   "scripts": {
-    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt && ncc build src/post.ts -o dist/post --source-map",
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
