@@ -64128,6 +64128,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
+const child_process_1 = __nccwpck_require__(5317);
 const client_ssm_1 = __nccwpck_require__(4736);
 async function run() {
     try {
@@ -64136,7 +64137,8 @@ async function run() {
         const localPort = core.getInput('local-port', { required: true });
         const remotePort = core.getInput('remote-port', { required: true });
         const awsRegion = core.getInput('aws-region', { required: true });
-        core.info('Starting SSM session via AWS SDK');
+        core.info('Starting SSM port forwarding session via AWS SDK...');
+        // First, start the session using AWS SDK to get session details
         const client = new client_ssm_1.SSMClient({
             region: awsRegion,
             customUserAgent: `gha-${github.context.repo.repo}`,
@@ -64152,13 +64154,55 @@ async function run() {
         };
         const command = new client_ssm_1.StartSessionCommand(sessionParams);
         const session = await client.send(command);
-        if (!session.SessionId) {
-            throw new Error('Failed to start SSM session: SessionId is missing from the response.');
+        if (!session.SessionId || !session.StreamUrl || !session.TokenValue) {
+            throw new Error('Failed to start SSM session: Missing required session details from AWS response.');
         }
+        core.info(`Session started with ID: ${session.SessionId}`);
+        // Create session details for session-manager-plugin
+        const sessionDetails = {
+            SessionId: session.SessionId,
+            TokenValue: session.TokenValue,
+            StreamUrl: session.StreamUrl,
+            Target: target,
+            DocumentName: 'AWS-StartPortForwardingSessionToRemoteHost',
+            Parameters: {
+                host: [host],
+                portNumber: [remotePort],
+                localPortNumber: [localPort],
+            }
+        };
+        // Start session-manager-plugin with the session details
+        const pluginArgs = [
+            JSON.stringify(sessionDetails),
+            awsRegion,
+            'StartSession'
+        ];
+        core.info('Starting session-manager-plugin...');
+        const pluginProcess = (0, child_process_1.spawn)('session-manager-plugin', pluginArgs, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: false
+        });
+        // Wait a moment for the plugin to initialize
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Check if the process is still running (indicates successful start)
+        if (pluginProcess.killed || pluginProcess.exitCode !== null) {
+            throw new Error('session-manager-plugin process failed to start or exited unexpectedly');
+        }
+        // Save the process PID and session details for cleanup
+        core.saveState('plugin-pid', pluginProcess.pid?.toString() || '');
         core.saveState('session-id', session.SessionId);
         core.saveState('aws-region', awsRegion);
-        core.info(`SSM session ${session.SessionId} has been established.`);
-        core.info('The port forwarding session is active.');
+        // Monitor the process output
+        pluginProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            core.info(`session-manager-plugin stdout: ${output}`);
+        });
+        pluginProcess.stderr.on('data', (data) => {
+            const output = data.toString();
+            core.info(`session-manager-plugin stderr: ${output}`);
+        });
+        core.info('Port forwarding session has been established.');
+        core.info(`Local port ${localPort} is now forwarding to ${host}:${remotePort} via ${target}`);
         core.info('Subsequent steps in this job can now connect to the remote host via localhost on the specified local port.');
     }
     catch (error) {
