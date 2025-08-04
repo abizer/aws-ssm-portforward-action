@@ -5,28 +5,28 @@ async function run() {
   try {
     const sessionId = core.getState('session-id');
     const awsRegion = core.getState('aws-region');
-    const pluginPid = core.getState('plugin-pid');
+    const awsProcessPid = core.getState('aws-process-pid');
 
-    // First, try to kill the session-manager-plugin process if we have a PID
-    if (pluginPid) {
+    // First, try to kill the AWS CLI process if we have a PID
+    if (awsProcessPid) {
       try {
-        const pid = parseInt(pluginPid);
+        const pid = parseInt(awsProcessPid);
         process.kill(pid, 'SIGTERM');
-        core.info(`session-manager-plugin process (PID: ${pid}) terminated.`);
+        core.info(`AWS CLI process (PID: ${pid}) terminated.`);
       } catch (processError) {
-        core.warning(`Failed to terminate session-manager-plugin process: ${processError}`);
+        core.warning(`Failed to terminate AWS CLI process: ${processError}`);
       }
     }
 
     // Then terminate the SSM session via AWS API
-    if (sessionId) {
+    if (sessionId && awsRegion) {
       const client = new SSMClient({ region: awsRegion });
       const command = new TerminateSessionCommand({ SessionId: sessionId });
       await client.send(command);
       core.info(`SSM session ${sessionId} terminated successfully.`);
     }
 
-    if (!sessionId && !pluginPid) {
+    if (!sessionId && !awsProcessPid) {
       core.info('No session or process to clean up.');
     }
   } catch (error) {

@@ -1,7 +1,5 @@
 import * as core from '@actions/core';
-import * as github from '@actions/github';
 import { spawn } from 'child_process';
-import { SSMClient, StartSessionCommand, StartSessionCommandInput } from '@aws-sdk/client-ssm';
 
 async function run() {
   try {
@@ -11,118 +9,92 @@ async function run() {
     const remotePort = core.getInput('remote-port', { required: true });
     const awsRegion = core.getInput('aws-region', { required: true });
 
-    core.info('Starting SSM port forwarding session via AWS SDK...');
+    core.info('Starting SSM port forwarding session...');
 
-    // First, start the session using AWS SDK to get session details
-    const client = new SSMClient({
-      region: awsRegion,
-      customUserAgent: `gha-${github.context.repo.repo}`,
-    });
-
-    const sessionParams: StartSessionCommandInput = {
-      Target: target,
-      DocumentName: 'AWS-StartPortForwardingSessionToRemoteHost',
-      Parameters: {
-        host: [host],
-        portNumber: [remotePort],
-        localPortNumber: [localPort],
-      },
-    };
-
-    const command = new StartSessionCommand(sessionParams);
-    const session = await client.send(command);
-
-    if (!session.SessionId || !session.StreamUrl || !session.TokenValue) {
-      throw new Error('Failed to start SSM session: Missing required session details from AWS response.');
-    }
-
-    core.info(`Session started with ID: ${session.SessionId}`);
-
-    // Create session details for session-manager-plugin
-    const sessionDetails = {
-      SessionId: session.SessionId,
-      TokenValue: session.TokenValue,
-      StreamUrl: session.StreamUrl,
-      Target: target,
-      DocumentName: 'AWS-StartPortForwardingSessionToRemoteHost',
-      Parameters: {
-        host: [host],
-        portNumber: [remotePort],
-        localPortNumber: [localPort],
-      }
-    };
-
-    // Start session-manager-plugin with the session details
-    const pluginArgs = [
-      JSON.stringify(sessionDetails),
-      awsRegion,
-      'StartSession'
+    // Use AWS CLI directly - it handles both the API call and session-manager-plugin invocation
+    const awsArgs = [
+      'ssm',
+      'start-session',
+      '--target', target,
+      '--document-name', 'AWS-StartPortForwardingSessionToRemoteHost',
+      '--parameters', `host=${host},portNumber=${remotePort},localPortNumber=${localPort}`,
+      '--region', awsRegion
     ];
 
-    core.info('Starting session-manager-plugin...');
-    const pluginProcess = spawn('session-manager-plugin', pluginArgs, {
+    core.info(`Running: aws ${awsArgs.join(' ')}`);
+
+    // Start AWS CLI in background
+    const awsProcess = spawn('aws', awsArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true
     });
 
-    // Detach the process so it doesn't prevent the action from completing
-    pluginProcess.unref();
+    // Detach so the action can complete
+    awsProcess.unref();
 
-    // Save the process PID and session details for cleanup
-    core.saveState('plugin-pid', pluginProcess.pid?.toString() || '');
-    core.saveState('session-id', session.SessionId);
+    // Save process info for cleanup
+    core.saveState('aws-process-pid', awsProcess.pid?.toString() || '');
     core.saveState('aws-region', awsRegion);
 
-    // Monitor the process output and wait for the tunnel to be established
-    let tunnelEstablished = false;
-    let errorOccurred = false;
+    // Monitor output briefly to confirm startup, then let it run
+    let sessionStarted = false;
+    let sessionId = '';
 
-    const outputPromise = new Promise<void>((resolve, reject) => {
+    const startupPromise = new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        if (!tunnelEstablished && !errorOccurred) {
-          reject(new Error('Timeout waiting for port forwarding tunnel to be established'));
+        if (!sessionStarted) {
+          reject(new Error('Timeout waiting for session to start'));
         }
-      }, 30000); // 30 second timeout
+      }, 30000);
 
-      pluginProcess.stdout.on('data', (data) => {
+      awsProcess.stdout.on('data', (data) => {
         const output = data.toString();
-        core.info(`session-manager-plugin stdout: ${output}`);
+        core.info(`AWS CLI output: ${output.trim()}`);
         
-        // Look for the message indicating the port is open
-        if (output.includes(`Port ${localPort} opened`) && output.includes('Waiting for connections')) {
-          tunnelEstablished = true;
+        // Look for session start confirmation
+        if (output.includes('Starting session with SessionId:')) {
+          const match = output.match(/SessionId: ([a-zA-Z0-9-]+)/);
+          if (match) {
+            sessionId = match[1];
+            core.saveState('session-id', sessionId);
+          }
+        }
+        
+        // Look for port forwarding confirmation
+        if (output.includes(`Port ${localPort} opened`) || output.includes('Waiting for connections')) {
+          sessionStarted = true;
           clearTimeout(timeout);
           resolve();
         }
       });
 
-      pluginProcess.stderr.on('data', (data) => {
+      awsProcess.stderr.on('data', (data) => {
         const output = data.toString();
-        core.info(`session-manager-plugin stderr: ${output}`);
+        core.info(`AWS CLI error: ${output.trim()}`);
         
-        // Check for error messages
-        if (output.toLowerCase().includes('error') || output.toLowerCase().includes('failed')) {
-          errorOccurred = true;
+        if (output.toLowerCase().includes('error')) {
           clearTimeout(timeout);
-          reject(new Error(`session-manager-plugin error: ${output}`));
+          reject(new Error(`AWS CLI error: ${output}`));
         }
       });
 
-      pluginProcess.on('exit', (code) => {
+      awsProcess.on('exit', (code) => {
         clearTimeout(timeout);
-        if (code !== 0 && !tunnelEstablished) {
-          errorOccurred = true;
-          reject(new Error(`session-manager-plugin exited with code ${code}`));
+        if (code !== 0 && !sessionStarted) {
+          reject(new Error(`AWS CLI exited with code ${code} before session was established`));
         }
       });
     });
 
-    // Wait for the tunnel to be established
-    await outputPromise;
+    // Wait for session to start, then let the action complete
+    await startupPromise;
 
-    core.info('Port forwarding tunnel has been successfully established.');
+    core.info('Port forwarding session established successfully!');
     core.info(`Local port ${localPort} is now forwarding to ${host}:${remotePort} via ${target}`);
-    core.info('Subsequent steps in this job can now connect to the remote host via localhost on the specified local port.');
+    if (sessionId) {
+      core.info(`Session ID: ${sessionId}`);
+    }
+    core.info('Subsequent steps can now connect to the remote host via localhost on the specified port.');
 
   } catch (error) {
     if (error instanceof Error) {
