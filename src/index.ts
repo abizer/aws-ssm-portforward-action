@@ -62,34 +62,65 @@ async function run() {
     core.info('Starting session-manager-plugin...');
     const pluginProcess = spawn('session-manager-plugin', pluginArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false
+      detached: true
     });
 
-    // Wait a moment for the plugin to initialize
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Check if the process is still running (indicates successful start)
-    if (pluginProcess.killed || pluginProcess.exitCode !== null) {
-      throw new Error('session-manager-plugin process failed to start or exited unexpectedly');
-    }
+    // Detach the process so it doesn't prevent the action from completing
+    pluginProcess.unref();
 
     // Save the process PID and session details for cleanup
     core.saveState('plugin-pid', pluginProcess.pid?.toString() || '');
     core.saveState('session-id', session.SessionId);
     core.saveState('aws-region', awsRegion);
 
-    // Monitor the process output
-    pluginProcess.stdout.on('data', (data) => {
-      const output = data.toString();
-      core.info(`session-manager-plugin stdout: ${output}`);
+    // Monitor the process output and wait for the tunnel to be established
+    let tunnelEstablished = false;
+    let errorOccurred = false;
+
+    const outputPromise = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (!tunnelEstablished && !errorOccurred) {
+          reject(new Error('Timeout waiting for port forwarding tunnel to be established'));
+        }
+      }, 30000); // 30 second timeout
+
+      pluginProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        core.info(`session-manager-plugin stdout: ${output}`);
+        
+        // Look for the message indicating the port is open
+        if (output.includes(`Port ${localPort} opened`) && output.includes('Waiting for connections')) {
+          tunnelEstablished = true;
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+
+      pluginProcess.stderr.on('data', (data) => {
+        const output = data.toString();
+        core.info(`session-manager-plugin stderr: ${output}`);
+        
+        // Check for error messages
+        if (output.toLowerCase().includes('error') || output.toLowerCase().includes('failed')) {
+          errorOccurred = true;
+          clearTimeout(timeout);
+          reject(new Error(`session-manager-plugin error: ${output}`));
+        }
+      });
+
+      pluginProcess.on('exit', (code) => {
+        clearTimeout(timeout);
+        if (code !== 0 && !tunnelEstablished) {
+          errorOccurred = true;
+          reject(new Error(`session-manager-plugin exited with code ${code}`));
+        }
+      });
     });
 
-    pluginProcess.stderr.on('data', (data) => {
-      const output = data.toString();
-      core.info(`session-manager-plugin stderr: ${output}`);
-    });
+    // Wait for the tunnel to be established
+    await outputPromise;
 
-    core.info('Port forwarding session has been established.');
+    core.info('Port forwarding tunnel has been successfully established.');
     core.info(`Local port ${localPort} is now forwarding to ${host}:${remotePort} via ${target}`);
     core.info('Subsequent steps in this job can now connect to the remote host via localhost on the specified local port.');
 
