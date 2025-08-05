@@ -84,7 +84,7 @@ async function run() {
     // Wait for tunnel to be ready
     await tunnelPromise;
     
-    core.info('Port forwarding tunnel established! Running user command...');
+    core.info('Port forwarding tunnel established! Running user command: ' + command);
     
     // Now run the user's command while the tunnel is active
     const userCommandResult = await new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => {
