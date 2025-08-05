@@ -15,6 +15,7 @@ async function run() {
     const command = core.getInput('command', { required: true });
 
     core.info('Starting SSM port forwarding session...');
+    core.info(`Current working directory: ${process.cwd()}`);
 
     // Start AWS CLI for port forwarding
     const awsArgs = [
@@ -86,10 +87,15 @@ async function run() {
     
     core.info('Port forwarding tunnel established! Running user command: ' + command);
     
-    // Now run the user's command while the tunnel is active
+    // Run the user's command using the shell directly
+    // The key insight: we use spawn with shell:true and pass the command as-is
+    // This respects the current working directory that GitHub Actions has already set
     const userCommandResult = await new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => {
-      const userProcess = spawn('bash', ['-c', command], {
+      const userProcess = spawn(command, [], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,  // This makes spawn use the shell to execute the command
+        cwd: process.cwd(),  // Explicitly use the current working directory
+        env: process.env  // Pass through all environment variables
       });
 
       let stdout = '';
